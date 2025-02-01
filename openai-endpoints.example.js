@@ -3,7 +3,7 @@ const endpoints = {
         mode: "ordered", // "ordered" (default) or "random", determines how to pick providers from the list
         api_key: "some-api-key", // endpoint-specific API key, in addition to the global MASTER_API_KEY from .env
         providers: [ // all requests to this endpoint will use these providers
-            { // this one will be used by default since it's the first one
+            { // this one will be used by default since it's the first one and our mode is "ordered"
                 name: "OpenRouter",                           // just a name, used in the logs
                 api_endpoint: "https://openrouter.ai/api/v1", // OpenAI-compatible API endpoint
                 api_key: "some-api-key",                      // your API key for this provider

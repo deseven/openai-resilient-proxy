@@ -17,7 +17,7 @@ This proxy is designed to be used as a simple health-aware gateway for OpenAI-co
 #### Prerequisites
 1. Clone this repo or download the code archive.
 2. Copy `.env.example` to `.env` and edit it, follow the comments.
-3. Copy `openai-endpoints.json.example` to `openai-endpoints.json` and edit it how you need, adding as many endpoints and providers as you like.
+3. Copy `openai-endpoints.example.js` to `openai-endpoints.js` and edit it how you need, adding as many endpoints and providers as you like.
 
 #### With docker compose (recommended)
 4. Run `docker compose up -d`.
