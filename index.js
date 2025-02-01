@@ -71,6 +71,7 @@ for (const prefix in providersConfig) {
         providerStates[prefix] = Object.entries(providersConfig[prefix]).map(([name, provider]) => ({
             name,
             ...provider,
+            timeout: provider.timeout || 30000,
             isDead: false,
             lastFailedAt: null,
         }));
@@ -94,6 +95,7 @@ const settings = {
                     {
                         ...provider,
                         api_key: obfuscate(provider.api_key),
+                        timeout: `${(provider.timeout || 30000) / 1000}s`,
                     },
                 ])
             ),
@@ -106,8 +108,11 @@ logger.info(`=== Startup Settings ===\n${prettyjson.render(settings, { noColor: 
 const app = express();
 app.use(express.json());
 
-// Middleware for API key authentication (applies to all routes)
+// Middleware for API key authentication (applies to all routes except /health)
 app.use((req, res, next) => {
+    if (req.path === '/health') {
+        return next();
+    }
     const authHeader = req.headers['authorization'] || '';
     const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
     const ip = req.headers['x-forwarded-for']?.split(',')[0] || req.ip || req.socket.remoteAddress;
@@ -240,6 +245,19 @@ for (const prefix in providerStates) {
         res.status(500).json({ error: 'All providers failed' });
     });
 }
+
+// Periodically check dead providers
+setInterval(() => {
+    for (const prefix in providerStates) {
+        const deadProviders = providerStates[prefix].filter(provider => provider.isDead);
+        deadProviders.forEach(provider => healthCheck(prefix, provider));
+    }
+}, DEAD_PROVIDER_CHECK_PERIOD * 60 * 1000);
+
+// Health check
+app.get('/health', (req, res) => {
+    res.send('OK');
+});
 
 // Start the Express server
 app.listen(API_PORT, () => {
