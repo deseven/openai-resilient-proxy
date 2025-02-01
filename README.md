@@ -22,7 +22,8 @@ This proxy is designed to be used as a simple health-aware gateway for OpenAI-co
 
 #### Notes
  - only `/chat/completions` endpoint is supported
- - there's a `/health` endpoint that could be used for monitoring
+ - there's a `/status` endpoint that outputs all defined endpoints and their providers with statuses
+ - there's also a `/health` endpoint that could be used for monitoring, it doesn't require an API key
 
 ## Contributing
 Contributions are welcome! Feel free to open an issue or submit a pull request.

@@ -41,7 +41,7 @@ logger.info('Starting up...');
 const {
     API_KEY,
     API_PORT = 8010,
-    DEAD_PROVIDER_CHECK_PERIOD = 60,
+    DEAD_PROVIDER_CHECK_PERIOD = 10,
 } = process.env;
 
 // Validate API_KEY
@@ -73,7 +73,7 @@ for (const prefix in providersConfig) {
             ...provider,
             timeout: provider.timeout || 30000,
             isDead: false,
-            lastFailedAt: null,
+            lastUsedAt: null
         }));
     } else {
         console.warn(`Prefix "${prefix}" has no providers or invalid configuration, skipping.`);
@@ -146,7 +146,6 @@ async function healthCheck(prefix, provider) {
         
         logger.info(`Provider "${provider.name}" for prefix "${prefix}" is back online.`);
         provider.isDead = false;
-        provider.lastFailedAt = null;
     } catch (err) {
         logger.debug(`Health check failed for provider "${provider.name}" on prefix "${prefix}": ${err.message}`);
     }
@@ -172,6 +171,7 @@ for (const prefix in providerStates) {
 
         for (const provider of availableProviders) {
             logger.info(`Trying ${provider.name} for ${normalizedPrefix}`);
+            provider.lastUsedAt = Date.now();
             const client = new OpenAI({
                 apiKey: provider.api_key,
                 baseURL: provider.api_endpoint,
@@ -205,7 +205,6 @@ for (const prefix in providerStates) {
                     } catch (streamErr) {
                         logger.error(`Stream error from ${provider.name}: ${streamErr.message}`);
                         provider.isDead = true;
-                        provider.lastFailedAt = Date.now();
                         res.end();
                         return;
                     }
@@ -226,7 +225,6 @@ for (const prefix in providerStates) {
                     if ([401, 403, 429, 500, 503].includes(err.status)) {
                         logger.warn(`Marking ${provider.name} dead (${err.status})`);
                         provider.isDead = true;
-                        provider.lastFailedAt = Date.now();
                     } else {
                         // Forward client errors (400, 404 etc)
                         return res.status(err.status).json({ error: err.message });
@@ -235,7 +233,6 @@ for (const prefix in providerStates) {
                     // Network/timeout errors
                     logger.warn(`Network error for ${provider.name}: ${err.message}`);
                     provider.isDead = true;
-                    provider.lastFailedAt = Date.now();
                 }
             }
         }
@@ -247,16 +244,31 @@ for (const prefix in providerStates) {
 }
 
 // Periodically check dead providers
-setInterval(() => {
-    for (const prefix in providerStates) {
-        const deadProviders = providerStates[prefix].filter(provider => provider.isDead);
-        deadProviders.forEach(provider => healthCheck(prefix, provider));
-    }
-}, DEAD_PROVIDER_CHECK_PERIOD * 60 * 1000);
+if (DEAD_PROVIDER_CHECK_PERIOD > 0) {
+    setInterval(() => {
+        for (const prefix in providerStates) {
+            const deadProviders = providerStates[prefix].filter(provider => provider.isDead);
+            deadProviders.forEach(provider => healthCheck(prefix, provider));
+        }
+    }, DEAD_PROVIDER_CHECK_PERIOD * 60 * 1000);
+}
 
 // Health check
 app.get('/health', (req, res) => {
     res.send('OK');
+});
+
+// Status check
+app.get('/status', (req, res) => {
+    const status = {};
+    for (const prefix in providerStates) {
+        status[prefix] = providerStates[prefix].map(provider => ({
+            name: provider.name,
+            isDead: provider.isDead,
+            lastUsedAt: provider.lastUsedAt ? new Date(provider.lastUsedAt).toISOString() : null
+        }));
+    }
+    res.send(JSON.stringify(status, null, 2));
 });
 
 // Start the Express server
