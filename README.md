@@ -27,8 +27,21 @@ This proxy is designed to be used as a simple health-aware gateway for OpenAI-co
 6. Run `npm i`.
 7. Run `npm run start`.
 
+## Reverse HTTP proxy configuration
+In order to add SSL support and do basic load balancing, it's recommended to put the proxy behind nginx or any other HTTP reverse proxy software. Example config for nginx:
+```
+location / {
+  proxy_set_header      X-Forwarded-For $proxy_add_x_forwarded_for;
+  proxy_set_header      Host $host;
+  proxy_pass            http://127.0.0.1:8010/;
+  proxy_http_version    1.1;
+  proxy_read_timeout    180; # make sure that your requests would fit into that
+  proxy_connect_timeout 180;
+  proxy_send_timeout    180;
+}
+```
+
 ## Notes
- - it's recommended to put the proxy behind nginx or any other HTTP reverse proxy software
  - only `/chat/completions` endpoint is supported
  - there's a `/status` endpoint that outputs all defined endpoints and their providers with statuses
  - there's also a `/health` endpoint that could be used for monitoring, it doesn't require an API key

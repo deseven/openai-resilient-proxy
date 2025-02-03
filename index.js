@@ -61,8 +61,9 @@ try {
     // 2. Every endpoint should have at least one provider defined.
     for (const [endpoint, config] of Object.entries(endpoints)) {
 
-        // Validate mode
-        if (config.mode !== undefined && !['ordered', 'random'].includes(config.mode)) {
+        // Validate mode and set default
+        config.mode = config.mode || 'ordered';
+        if (!['ordered', 'random'].includes(config.mode)) {
             throw new Error(`endpoint "${endpoint}" has invalid "mode". It must be either "ordered" or "random".`);
         }
 
@@ -112,6 +113,24 @@ try {
                 if (typeof provider.timeout !== 'number' || provider.timeout <= 500) {
                     throw new Error(`provider "${provider.name}" in endpoint "${endpoint}" has an invalid "timeout". It must be a number greater than 500.`);
                 }
+            } else {
+                // Set default timeout if not defined
+                provider.timeout = 30000;
+            }
+
+            // 4f. retries is optional, defaults to 0
+            if (provider.retries !== undefined) {
+                if (typeof provider.retries !== 'number' || provider.retries < 0 || !Number.isInteger(provider.retries)) {
+                    throw new Error(`provider "${provider.name}" in endpoint "${endpoint}" has an invalid "retries". It must be a non-negative integer.`);
+                }
+            } else {
+                // Set default retries if not defined
+                provider.retries = 0;
+            }
+
+            // Validation: provider.timeout * retries <= 300000 ms (300 seconds)
+            if (provider.timeout * (provider.retries + 1) > 300000) {
+                throw new Error(`provider "${provider.name}" in endpoint "${endpoint}" has timeout * (retries+1) (${provider.timeout} * ${provider.retries + 1}) exceeding 300 seconds, which is probably not a good idea.`);
             }
         }
     }
@@ -125,13 +144,14 @@ const providerStates = {};
 for (const endpoint in endpoints) {
     if (Array.isArray(endpoints[endpoint].providers) && endpoints[endpoint].providers.length > 0) {
         providerStates[endpoint] = {
-            mode: endpoints[endpoint].mode || 'ordered',
+            mode: endpoints[endpoint].mode,
             providers: endpoints[endpoint].providers.map(provider => ({
                 name: provider.name,
                 api_endpoint: provider.api_endpoint,
                 api_key: provider.api_key,
                 model: provider.model,
-                timeout: provider.timeout || 30000,
+                timeout: provider.timeout,
+                retries: provider.retries,
                 isDead: false,
                 lastUsedAt: null
             }))
@@ -146,12 +166,12 @@ const settings = {
     LOG_LEVEL,
     API_KEY: obfuscate(MASTER_API_KEY),
     API_PORT,
-    DEAD_PROVIDER_CHECK_PERIOD: (DEAD_PROVIDER_CHECK_PERIOD || 'disabled'),
+    DEAD_PROVIDER_CHECK_PERIOD: DEAD_PROVIDER_CHECK_PERIOD ? `${DEAD_PROVIDER_CHECK_PERIOD}m` : 'disabled',
     ENDPOINTS: Object.fromEntries(
         Object.entries(endpoints).map(([route, endpointConfig]) => [
             route,
             {
-                mode: endpointConfig.mode || 'ordered',
+                mode: endpointConfig.mode,
                 api_key: endpointConfig.api_key ? obfuscate(endpointConfig.api_key) : undefined,
                 providers: Object.fromEntries(
                     endpointConfig.providers.map(provider => [
@@ -160,7 +180,8 @@ const settings = {
                             api_endpoint: provider.api_endpoint,
                             api_key: obfuscate(provider.api_key),
                             model: provider.model ? provider.model : undefined,
-                            timeout: `${(provider.timeout || 30000) / 1000}s`,
+                            timeout: (provider.timeout % 1000 === 0) ? `${provider.timeout / 1000}s` : `${provider.timeout}ms`,
+                            retries: provider.retries
                         },
                     ])
                 )
@@ -231,6 +252,7 @@ async function healthCheck(endpoint, provider) {
             apiKey: provider.api_key,
             baseURL: provider.api_endpoint,
             timeout: provider.timeout,
+            maxRetries: provider.retries,
         });
 
         await client.chat.completions.create({
@@ -265,12 +287,13 @@ for (const endpoint in providerStates) {
         }
 
         for (const provider of availableProviders) {
-            logger.info(`Trying ${provider.name} for ${normalizedEndpoint}`);
+            logger.info(`Trying ${provider.name} for ${normalizedEndpoint} with timeout of ${provider.timeout}ms`);
             provider.lastUsedAt = Date.now();
             const client = new OpenAI({
                 apiKey: provider.api_key,
                 baseURL: provider.api_endpoint,
                 timeout: provider.timeout,
+                maxRetries: provider.retries,
             });
 
             try {
@@ -290,7 +313,6 @@ for (const endpoint in providerStates) {
 
                     try {
                         for await (const chunk of stream) {
-                            logger.debug(`data: ${JSON.stringify(chunk)}\n\n`);
                             res.write(`data: ${JSON.stringify(chunk)}\n\n`);
                         }
                         res.write('data: [DONE]\n\n');
@@ -317,12 +339,13 @@ for (const endpoint in providerStates) {
                 // Handle API errors
                 if (err instanceof OpenAI.APIError) {
                     // Mark provider dead for auth/rate limit/server errors
-                    if ([401, 403, 429, 500, 503].includes(err.status)) {
-                        logger.warn(`Marking ${provider.name} dead (${err.status})`);
+                    if ([401, 403, 429, 500, 503].includes(err.status) || err.message == 'Request timed out.') {
+                        logger.warn(`Marking ${provider.name} dead (${err.status || 'timeouted'})`);
                         provider.isDead = true;
                     } else {
                         // Forward client errors (400, 404 etc)
-                        return res.status(err.status).json({ error: err.message });
+                        logger.info(`Returning error answer from ${provider.name} for ${normalizedEndpoint}`);
+                        return res.status(err.status || 500).json({ error: err.message });
                     }
                 } else {
                     // Network/timeout errors

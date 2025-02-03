@@ -7,7 +7,8 @@ const endpoints = {
                 name: "OpenRouter",                           // just a name, used in the logs
                 api_endpoint: "https://openrouter.ai/api/v1", // OpenAI-compatible API endpoint
                 api_key: "some-api-key",                      // your API key for this provider
-                timeout: 20000                                // timeout in ms, if not defined it's 30000
+                timeout: 20000,                               // timeout in ms for one try, default 30000
+                retries: 1                                    // number of retries, default 0
             },
             { // this one will be used if the first one failed
                 name: "Together",
