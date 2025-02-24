@@ -340,15 +340,18 @@ for (const endpoint in providerStates) {
             } catch (err) {
                 // Handle API errors
                 if (err instanceof OpenAI.APIError) {
+                    const status = err.status;
+                    const statusCode = typeof status === 'string' ? parseInt(status, 10) : status;
+
                     // Mark provider dead for auth/rate limit/server errors
-                    if ([401, 403, 429, 500, 503].includes(err.status) || err.message == 'Request timed out.') {
+                    if ([401, 403, 429].includes(statusCode) || err.message === 'Request timed out.' || (statusCode >= 500 && statusCode < 600)) {
                         logger.warn(`Marking ${provider.name} dead (${err.status || 'timeouted'})`);
                         provider.isDead = true;
                     } else {
                         // Forward client errors (400, 404 etc)
                         logger.info(`Returning error answer from ${provider.name} for ${normalizedEndpoint}`);
                         logger.debug(err);
-                        return res.status(err.status || 500).json({ error: err.message });
+                        return res.status(statusCode || 500).json({ error: err.message });
                     }
                 } else {
                     // Network/timeout errors
