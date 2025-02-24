@@ -17,7 +17,8 @@ const endpoints = {
             }
         ]
     },
-    "/forced-model": { // an example on enforcing the model in the incoming requests 
+    "/forced-model": { // an example on enforcing the model in the incoming requests
+        models: [ 'deepseek-chat' ], // a way to define what model list would be returned by calling /models
         providers: [
             {
                 name: "DeepSeek V3",

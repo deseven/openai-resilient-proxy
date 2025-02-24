@@ -181,7 +181,7 @@ const settings = {
                             api_key: obfuscate(provider.api_key),
                             model: provider.model ? provider.model : undefined,
                             timeout: (provider.timeout % 1000 === 0) ? `${provider.timeout / 1000}s` : `${provider.timeout}ms`,
-                            retries: provider.retries
+                            retries: (provider.retries > 0) ? provider.retries : undefined
                         },
                     ])
                 )
@@ -193,7 +193,7 @@ logger.info(`=== Startup Settings ===\n${prettyjson.render(settings, { noColor: 
 
 // Express app setup
 const app = express();
-app.use(express.json());
+app.use(express.json({ buffered: false }));
 
 // Middleware for API key authentication (applies to all routes except /health)
 app.use((req, res, next) => {
@@ -222,6 +222,7 @@ app.use((req, res, next) => {
     const endpointApiKey = endpointConfig && endpointConfig.api_key;
 
     if (token !== MASTER_API_KEY && token !== endpointApiKey) {
+        logger.debug(JSON.stringify(req.headers, null, 2));
         logger.warn(`Unauthorized access attempt from ${ip} to ${req.originalUrl}`);
         return res.status(401).json({ error: 'Unauthorized' });
     }
@@ -309,6 +310,7 @@ for (const endpoint in providerStates) {
                     res.setHeader('Content-Type', 'text/event-stream');
                     res.setHeader('Cache-Control', 'no-cache');
                     res.setHeader('Connection', 'keep-alive');
+                    res.setHeader('X-Accel-Buffering', 'no');
                     res.flushHeaders();
 
                     try {
@@ -345,6 +347,7 @@ for (const endpoint in providerStates) {
                     } else {
                         // Forward client errors (400, 404 etc)
                         logger.info(`Returning error answer from ${provider.name} for ${normalizedEndpoint}`);
+                        logger.debug(err);
                         return res.status(err.status || 500).json({ error: err.message });
                     }
                 } else {
@@ -358,6 +361,25 @@ for (const endpoint in providerStates) {
         // All providers failed
         logger.error(`All providers failed for ${normalizedEndpoint}`);
         res.status(500).json({ error: 'All providers failed' });
+    });
+
+    // Add /models route for each endpoint
+    app.get(`${normalizedEndpoint}/models`, (req, res) => {
+        const endpointConfig = endpoints[endpoint];
+        const models = endpointConfig.models || [];
+        const created = Math.floor(Date.now() / 1000);
+
+        const response = {
+            object: "list",
+            data: models.map(model => ({
+                id: model,
+                object: "model",
+                created: created,
+                owned_by: endpoint
+            }))
+        };
+
+        res.json(response);
     });
 }
 
