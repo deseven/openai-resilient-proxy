@@ -258,7 +258,7 @@ async function healthCheck(endpoint, provider) {
 
         await client.chat.completions.create({
             model: provider.model,
-            messages: [{ role: 'system', content: 'say hello' }],
+            messages: [{ role: 'user', content: 'say hello' }],
             stream: false,
         });
 
